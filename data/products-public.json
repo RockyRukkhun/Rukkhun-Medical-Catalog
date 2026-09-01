@@ -1,0 +1,29 @@
+{
+  "business": {
+    "name": "",
+    "tagline": "",
+    "phone": "",
+    "line": "",
+    "email": "",
+    "address": "",
+    "logo": ""
+  },
+  "products": [
+    {
+      "id": "p_mtis5qsdx6yje4",
+      "name": "เครื่องวัดความดัน",
+      "brand": "Dwell Black Diamond",
+      "category": "เครื่องวัดความดัน",
+      "description": "",
+      "price": 2500,
+      "images": [
+        "images/p_mtis5qsdx6yje4-0-mtis5uz8.jpg",
+        "images/p_mtis5qsdx6yje4-1-mtis5wj2.jpg"
+      ],
+      "sku": "",
+      "unit": "",
+      "status": "available",
+      "updatedAt": 1788273986269
+    }
+  ]
+}
