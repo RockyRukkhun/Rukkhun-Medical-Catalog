@@ -31,6 +31,11 @@
     padding:12px 16px; display:flex; align-items:center; gap:12px; border-radius:var(--radius-lg) var(--radius-lg) 0 0;
     box-shadow:var(--shadow-lg); margin-top:20px; }
   .save-bar .status{ font-size:13px; color:var(--ink-soft); flex:1; }
+  .row-check{ width:17px; height:17px; cursor:pointer; }
+  .bulk-bar{ display:flex; align-items:center; gap:12px; background:var(--internal-soft); color:var(--internal);
+    border:1px solid var(--internal); border-radius:var(--radius-sm); padding:9px 14px; margin-bottom:14px;
+    font-size:13.5px; font-family:var(--font-heading); }
+  .bulk-bar .bulk-actions{ margin-left:auto; display:flex; gap:8px; }
 </style>
 </head>
 <body>
@@ -66,7 +71,7 @@
     loaded: false,
     saving: false
   };
-  var ui = { query:'', category:'ทั้งหมด', modal:null, editId:null, importState:null };
+  var ui = { query:'', category:'ทั้งหมด', modal:null, editId:null, importState:null, selected:{} };
 
   function $(sel, root){ return (root||document).querySelector(sel); }
   function $all(sel, root){ return Array.prototype.slice.call((root||document).querySelectorAll(sel)); }
@@ -278,6 +283,7 @@
           (state.products.length ? '<div class="filter-pills">'+renderPills()+'</div>' : '') +
         '</div>' +
 
+        renderBulkBar() +
         renderTable() +
 
         '<div class="save-bar">' +
@@ -309,12 +315,14 @@
     if (!list.length){
       return '<div class="empty-state"><div class="empty-icon">🔍</div><h2>ไม่พบสินค้าที่ค้นหา</h2></div>';
     }
+    var allSelected = list.length>0 && list.every(function(p){ return !!ui.selected[p.id]; });
     var rows = list.map(function(p){
       var thumb = p.images[0] ? (p.images[0].url || p.images[0].dataUrl) : '';
       var m = marginInfo(p.price, p.cost);
       var pctTxt = m.pct==null ? '—' : (m.pct.toFixed(0) + '%');
       var pctClass = m.pct==null ? '' : (m.pct >= 0 ? 'margin-pos' : 'margin-neg');
       return '<tr>' +
+        '<td><input type="checkbox" class="row-check" data-action="toggle-select-row" data-id="'+p.id+'"'+(ui.selected[p.id]?' checked':'')+'></td>' +
         '<td>' + (thumb ? '<img class="row-thumb" src="'+thumb+'" alt="">' : '<div class="row-thumb" style="display:flex;align-items:center;justify-content:center;color:var(--ink-faint);">–</div>') + '</td>' +
         '<td><div class="row-name">'+escapeHtml(p.name)+'</div>' + (p.brand?'<div class="row-brand">'+escapeHtml(p.brand)+'</div>':'') + '</td>' +
         '<td>'+escapeHtml(p.category||'—')+'</td>' +
@@ -328,9 +336,22 @@
       '</tr>';
     }).join('');
     return '<div class="table-wrap"><div class="twrap"><table class="prod-table"><thead><tr>' +
+      '<th><input type="checkbox" class="row-check" data-action="toggle-select-all"'+(allSelected?' checked':'')+'></th>' +
       '<th></th><th>สินค้า</th><th>หมวดหมู่</th><th style="text-align:right;">ราคาขาย</th>' +
       '<th style="text-align:right;">ต้นทุน</th><th style="text-align:right;">กำไร%</th><th></th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+  }
+
+  function renderBulkBar(){
+    var ids = Object.keys(ui.selected).filter(function(id){ return ui.selected[id]; });
+    if (!ids.length) return '';
+    return '<div class="bulk-bar">' +
+      '<span>✅ เลือกอยู่ ' + ids.length + ' รายการ</span>' +
+      '<div class="bulk-actions">' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-action="clear-selection">ยกเลิกการเลือก</button>' +
+        '<button type="button" class="btn btn-danger btn-sm" data-action="bulk-delete-open">🗑 ลบที่เลือก (' + ids.length + ')</button>' +
+      '</div>' +
+    '</div>';
   }
 
   /* ---------------- modal ---------------- */
@@ -339,6 +360,7 @@
     if (!ui.modal) return '';
     if (ui.modal === 'product') return renderProductModal();
     if (ui.modal === 'delete') return renderDeleteModal();
+    if (ui.modal === 'bulk-delete') return renderBulkDeleteModal();
     if (ui.modal === 'business') return renderBusinessModal();
     if (ui.modal === 'import') return renderImportModal();
     return '';
@@ -412,6 +434,24 @@
           '<div class="modal-actions">' +
             '<button type="button" class="btn btn-ghost" data-action="close-modal">ยกเลิก</button>' +
             '<button type="button" class="btn btn-danger" data-action="confirm-delete" data-id="'+p.id+'">ลบสินค้า</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function renderBulkDeleteModal(){
+    var ids = Object.keys(ui.selected).filter(function(id){ return ui.selected[id]; });
+    var names = state.products.filter(function(p){ return ids.indexOf(p.id)!==-1; }).map(function(p){ return p.name || '(ไม่มีชื่อ)'; });
+    var preview = names.slice(0,6).map(escapeHtml).join(', ') + (names.length>6 ? ' และอีก '+(names.length-6)+' รายการ' : '');
+    return (
+      '<div class="modal-overlay" data-action="overlay-close">' +
+        '<div class="modal modal-sm" data-stop>' +
+          '<h2>ลบสินค้า ' + ids.length + ' รายการใช่ไหม?</h2>' +
+          '<p>' + preview + ' จะถูกลบออกจากรายการ (ต้องกด "บันทึก &amp; เผยแพร่" อีกครั้งเพื่อให้มีผลจริงบนเว็บ)</p>' +
+          '<div class="modal-actions">' +
+            '<button type="button" class="btn btn-ghost" data-action="close-modal">ยกเลิก</button>' +
+            '<button type="button" class="btn btn-danger" data-action="confirm-bulk-delete">ลบ ' + ids.length + ' รายการ</button>' +
           '</div>' +
         '</div>' +
       '</div>'
@@ -574,9 +614,33 @@
       if (action === 'edit-product'){ ui.modal='product'; ui.editId=t.getAttribute('data-id'); render(); return; }
       if (action === 'delete-product'){ ui.modal='delete'; ui.editId=t.getAttribute('data-id'); render(); return; }
       if (action === 'confirm-delete'){
-        state.products = state.products.filter(function(p){ return p.id !== t.getAttribute('data-id'); });
+        var delId = t.getAttribute('data-id');
+        state.products = state.products.filter(function(p){ return p.id !== delId; });
+        delete ui.selected[delId];
         ui.modal=null; ui.editId=null; render();
         toast('ลบออกจากรายการแล้ว — อย่าลืมกด "บันทึก & เผยแพร่"');
+        return;
+      }
+      if (action === 'toggle-select-row'){
+        var rid = t.getAttribute('data-id');
+        if (ui.selected[rid]) delete ui.selected[rid]; else ui.selected[rid] = true;
+        render();
+        return;
+      }
+      if (action === 'toggle-select-all'){
+        var visList = filteredProducts();
+        var allSel = visList.length>0 && visList.every(function(p){ return !!ui.selected[p.id]; });
+        visList.forEach(function(p){ if (allSel) delete ui.selected[p.id]; else ui.selected[p.id] = true; });
+        render();
+        return;
+      }
+      if (action === 'clear-selection'){ ui.selected = {}; render(); return; }
+      if (action === 'bulk-delete-open'){ ui.modal='bulk-delete'; render(); return; }
+      if (action === 'confirm-bulk-delete'){
+        var delIds = Object.keys(ui.selected).filter(function(id){ return ui.selected[id]; });
+        state.products = state.products.filter(function(p){ return delIds.indexOf(p.id) === -1; });
+        ui.selected = {}; ui.modal = null; render();
+        toast('ลบ ' + delIds.length + ' รายการแล้ว — อย่าลืมกด "บันทึก & เผยแพร่"');
         return;
       }
       if (action === 'edit-business'){ ui.modal='business'; render(); return; }
