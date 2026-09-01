@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>แคตตาล็อคสินค้า — Rukkhun Medical</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chonburi&family=Kanit:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .print-only{ display:none; }
+  .card-select{ position:absolute; top:10px; left:10px; z-index:2; width:22px; height:22px; cursor:pointer; }
+  .card-clickable{ cursor:pointer; }
+  .select-bar{ position:fixed; left:0; right:0; bottom:0; background:var(--paper-raised); border-top:1px solid var(--border);
+    padding:12px 20px; display:flex; align-items:center; gap:12px; box-shadow:var(--shadow-lg); z-index:40; }
+  .select-bar .count{ font-family:var(--font-heading); font-size:14px; }
+  .gallery-main{ width:100%; aspect-ratio:4/3; border-radius:var(--radius-md); overflow:hidden; background:var(--paper-sunken);
+    display:flex; align-items:center; justify-content:center; margin-bottom:10px; }
+  .gallery-main img{ width:100%; height:100%; object-fit:contain; background:var(--paper-sunken); }
+  .gallery-thumbs{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+  .gallery-thumbs img{ width:60px; height:60px; object-fit:cover; border-radius:8px; cursor:pointer; border:2px solid transparent; }
+  .gallery-thumbs img.active{ border-color:var(--accent); }
+  .detail-price{ font-family:var(--font-heading); font-weight:700; color:var(--gold); font-size:22px; margin:6px 0 14px; }
+  .detail-meta{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .print-footer{ margin-top:32px; text-align:center; color:var(--ink-faint); font-size:12px; }
+
+  #print-area{ display:none; }
+  @media print{
+    .no-print{ display:none !important; }
+    .print-only{ display:block; }
+    body{ background:#fff; color:#1a1a1a; font-size:12px; }
+    #app > .shell{ display:none !important; }
+    #print-area{ display:block; max-width:none; padding:0 6mm; }
+    #print-area .shell{ max-width:none; padding:0; }
+    #print-area .topbar{ border-color:#ccc; padding-bottom:12px; margin-bottom:14px; }
+    #print-area .brand-name{ color:#1a1a1a; }
+    #print-area .brand-mark{ background:#eee; }
+    #print-area .grid{ grid-template-columns:repeat(2, 1fr); gap:12px; }
+    #print-area .card{ box-shadow:none; border-color:#ccc; break-inside:avoid; }
+    #print-area .pill{ background:#eee; color:#333; }
+    #print-area .price{ color:#1a1a1a; }
+    #print-area .card-media{ background:#f2f2f2; }
+    @page{ margin:14mm 12mm; }
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="shell"><p style="color:var(--ink-faint)">กำลังโหลดแคตตาล็อค…</p></div>
+</div>
+<div id="print-area"></div>
+
+<script>
+(function(){
+  'use strict';
+
+  var DATA_URL = './data/products-public.json';
+
+  var state = { business:{}, products:[], loaded:false, error:null };
+  var ui = { query:'', category:'ทั้งหมด', selected:{}, detailId:null, printMode:null };
+
+  function $(sel, root){ return (root||document).querySelector(sel); }
+  function $all(sel, root){ return Array.prototype.slice.call((root||document).querySelectorAll(sel)); }
+  function escapeHtml(s){
+    return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function escapeAttr(s){ return escapeHtml(s); }
+  function formatPrice(n){
+    if (n===''||n==null||isNaN(n)) return '-';
+    var num = Number(n);
+    return num.toLocaleString('th-TH', { minimumFractionDigits:(num%1===0)?0:2, maximumFractionDigits:2 });
+  }
+  function dateThai(){ return new Date().toLocaleDateString('th-TH', { year:'numeric', month:'long', day:'numeric' }); }
+
+  function boot(){
+    fetch(DATA_URL, { cache:'no-store' }).then(function(res){
+      if (!res.ok) throw new Error('load-failed');
+      return res.json();
+    }).then(function(data){
+      state.business = data.business || {};
+      state.products = data.products || [];
+      state.loaded = true;
+      render();
+    }).catch(function(){
+      state.error = 'ยังไม่พบข้อมูลแคตตาล็อค (อาจยังไม่ได้เผยแพร่ครั้งแรก)';
+      state.loaded = true;
+      render();
+    });
+  }
+
+  function categories(){
+    var set = [];
+    state.products.forEach(function(p){
+      var c = (p.category||'').trim();
+      if (c && set.indexOf(c) === -1) set.push(c);
+    });
+    return set;
+  }
+  function filteredProducts(){
+    var q = ui.query.trim().toLowerCase();
+    return state.products.filter(function(p){
+      if (ui.category !== 'ทั้งหมด' && (p.category||'') !== ui.category) return false;
+      if (!q) return true;
+      var hay = (p.name+' '+(p.brand||'')+' '+p.category+' '+p.description).toLowerCase();
+      return hay.indexOf(q) !== -1;
+    });
+  }
+  function selectedCount(){ return Object.keys(ui.selected).filter(function(k){ return ui.selected[k]; }).length; }
+
+  /* ---------------- render ---------------- */
+
+  function render(){
+    var html = '';
+    if (!state.loaded){
+      html = '<div class="shell"><p style="color:var(--ink-faint)">กำลังโหลดแคตตาล็อค…</p></div>';
+    } else if (state.error){
+      html = '<div class="shell"><div class="empty-state" style="margin-top:20px;"><div class="empty-icon">🗂️</div>' +
+        '<h2>'+escapeHtml(state.error)+'</h2></div></div>';
+    } else {
+      html = renderApp();
+    }
+    html += renderDetailModal();
+    $('#app').innerHTML = html;
+    bindOnce();
+    bindFrame();
+    renderSelectBar();
+  }
+
+  function renderApp(){
+    var b = state.business;
+    var contactBits = [];
+    if (b.phone) contactBits.push('โทร ' + escapeHtml(b.phone));
+    if (b.line) contactBits.push('LINE: ' + escapeHtml(b.line));
+    if (b.email) contactBits.push(escapeHtml(b.email));
+    if (b.address) contactBits.push(escapeHtml(b.address));
+
+    return (
+      '<div class="shell" style="padding-bottom:110px;">' +
+        '<header class="topbar">' +
+          '<div class="brand">' +
+            '<div class="brand-mark">' + (b.logo ? '<img src="'+b.logo+'" alt="โลโก้">' : '🏥') + '</div>' +
+            '<div class="brand-text">' +
+              '<h1 class="brand-name'+(b.name?'':' placeholder')+'">'+escapeHtml(b.name || 'แคตตาล็อคสินค้า')+'</h1>' +
+              '<p class="brand-tagline">'+escapeHtml(b.tagline || '')+'</p>' +
+              (contactBits.length ? '<p class="brand-contact">'+contactBits.join(' &nbsp;•&nbsp; ')+'</p>' : '') +
+            '</div>' +
+          '</div>' +
+        '</header>' +
+
+        '<div class="toolbar no-print">' +
+          '<div class="search-wrap"><input type="search" id="search-input" placeholder="ค้นหาสินค้า..." value="'+escapeAttr(ui.query)+'"></div>' +
+          '<div class="toolbar-actions">' +
+            '<button type="button" class="btn btn-outline btn-sm" data-action="print-scope" data-scope="filtered" data-mode="with-price">พิมพ์ทั้งหมด (มีราคา)</button>' +
+            '<button type="button" class="btn btn-outline btn-sm" data-action="print-scope" data-scope="filtered" data-mode="no-price">พิมพ์ทั้งหมด (ไม่มีราคา)</button>' +
+          '</div>' +
+          (state.products.length ? '<div class="filter-pills">'+renderPills()+'</div>' : '') +
+        '</div>' +
+
+        '<main class="grid" id="product-grid">' + renderGrid() + '</main>' +
+      '</div>'
+    );
+  }
+
+  function renderPills(){
+    var cats = categories();
+    var all = [{ name:'ทั้งหมด', count: state.products.length }].concat(
+      cats.map(function(c){ return { name:c, count: state.products.filter(function(p){ return p.category===c; }).length }; })
+    );
+    return all.map(function(c){
+      return '<button type="button" class="pill-filter'+(ui.category===c.name?' active':'')+'" data-action="filter-category" data-cat="'+escapeAttr(c.name)+'">'+
+        escapeHtml(c.name)+' <span class="count">'+c.count+'</span></button>';
+    }).join('');
+  }
+
+  function renderCard(p, forPrint){
+    var img = (p.images && p.images[0]) ? p.images[0] : '';
+    var media = img ? '<img src="'+escapeAttr(img)+'" alt="'+escapeAttr(p.name)+'">' :
+      '<div class="media-placeholder">'+escapeHtml((p.name||'?').trim().charAt(0).toUpperCase()||'?')+'</div>';
+    var countBadge = (p.images && p.images.length > 1) ? '<span class="img-count">'+p.images.length+' รูป</span>' : '';
+    var checked = ui.selected[p.id] ? ' checked' : '';
+    var showPrice = !forPrint || ui.printMode !== 'no-price';
+    return (
+      '<article class="card' + (forPrint?'':' card-clickable') + '" data-id="'+p.id+'"' + (forPrint?'':' data-action="open-detail"') + '>' +
+        (forPrint ? '' : '<input type="checkbox" class="card-select no-print" data-action="toggle-select" data-id="'+p.id+'"'+checked+' aria-label="เลือกสำหรับพิมพ์">') +
+        '<div class="card-media">'+media+countBadge+'</div>' +
+        '<div class="card-body">' +
+          '<span class="pill">'+escapeHtml(p.category || 'ไม่ระบุหมวดหมู่')+'</span>' +
+          (p.brand ? '<span class="card-brand">'+escapeHtml(p.brand)+'</span>' : '') +
+          '<h3 class="card-name">'+escapeHtml(p.name)+'</h3>' +
+          (p.description ? '<p class="card-desc">'+escapeHtml(p.description)+'</p>' : '') +
+        '</div>' +
+        '<div class="card-footer">' +
+          (showPrice ? '<span class="price">'+formatPrice(p.price)+'<small>บาท</small></span>' : '<span></span>') +
+        '</div>' +
+      '</article>'
+    );
+  }
+
+  function renderGrid(){
+    var list = filteredProducts();
+    if (!state.products.length){
+      return '<div class="empty-state"><div class="empty-icon">🗂️</div><h2>ยังไม่มีสินค้าในแคตตาล็อค</h2></div>';
+    }
+    if (!list.length){
+      return '<div class="empty-state"><div class="empty-icon">🔍</div><h2>ไม่พบสินค้าที่ค้นหา</h2></div>';
+    }
+    return list.map(function(p){ return renderCard(p,false); }).join('');
+  }
+
+  function renderDetailModal(){
+    if (!ui.detailId) return '';
+    var p = state.products.find(function(x){ return x.id === ui.detailId; });
+    if (!p) return '';
+    var images = p.images && p.images.length ? p.images : [];
+    var main = images[0] || '';
+    return (
+      '<div class="modal-overlay no-print" data-action="overlay-close">' +
+        '<div class="modal modal-wide" data-stop>' +
+          '<div class="modal-head"><h2>'+escapeHtml(p.name)+'</h2><button type="button" class="modal-close" data-action="close-modal">✕</button></div>' +
+          (main ?
+            '<div class="gallery-main"><img id="gallery-main-img" src="'+escapeAttr(main)+'" alt="'+escapeAttr(p.name)+'"></div>' +
+            (images.length > 1 ? '<div class="gallery-thumbs">' + images.map(function(im,i){
+              return '<img src="'+escapeAttr(im)+'" class="'+(i===0?'active':'')+'" data-action="gallery-select" data-src="'+escapeAttr(im)+'">';
+            }).join('') + '</div>' : '')
+          : '<div class="gallery-main"><div class="media-placeholder" style="width:100%;height:100%;">'+escapeHtml((p.name||'?').charAt(0))+'</div></div>') +
+          '<div class="detail-meta">' +
+            '<span class="pill">'+escapeHtml(p.category||'ไม่ระบุหมวดหมู่')+'</span>' +
+            (p.brand ? '<span class="pill" style="background:var(--paper-sunken);color:var(--ink-soft);">'+escapeHtml(p.brand)+'</span>' : '') +
+          '</div>' +
+          '<div class="detail-price">'+formatPrice(p.price)+' บาท</div>' +
+          (p.description ? '<p style="color:var(--ink-soft);white-space:pre-wrap;">'+escapeHtml(p.description)+'</p>' : '') +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function renderSelectBar(){
+    var existing = $('#select-bar'); if (existing) existing.remove();
+    var n = selectedCount();
+    if (!n) return;
+    var bar = document.createElement('div');
+    bar.id = 'select-bar';
+    bar.className = 'select-bar no-print';
+    bar.innerHTML =
+      '<span class="count">เลือกไว้ ' + n + ' ชิ้น</span>' +
+      '<button type="button" class="btn btn-outline btn-sm" data-action="clear-select">ล้างการเลือก</button>' +
+      '<button type="button" class="btn btn-primary btn-sm" style="margin-left:auto;" data-action="print-scope" data-scope="selected" data-mode="with-price">พิมพ์ที่เลือก (มีราคา)</button>' +
+      '<button type="button" class="btn btn-outline btn-sm" data-action="print-scope" data-scope="selected" data-mode="no-price">พิมพ์ที่เลือก (ไม่มีราคา)</button>';
+    document.body.appendChild(bar);
+  }
+
+  /* ---------------- events ---------------- */
+
+  var frameBound = false;
+  function bindFrame(){
+    var search = $('#search-input');
+    if (search) search.addEventListener('input', function(e){ ui.query = e.target.value; render(); });
+  }
+
+  function bindOnce(){
+    if (frameBound) return;
+    frameBound = true;
+    document.getElementById('app').addEventListener('click', function(e){
+      var t = e.target.closest('[data-action]');
+      if (!t) return;
+      var action = t.getAttribute('data-action');
+      if (action === 'overlay-close' && e.target === t){ ui.detailId=null; render(); return; }
+      if (action === 'close-modal'){ ui.detailId=null; render(); return; }
+      if (action === 'open-detail'){
+        if (e.target.closest('[data-action="toggle-select"]')) return;
+        ui.detailId = t.getAttribute('data-id'); render(); return;
+      }
+      if (action === 'toggle-select'){
+        e.stopPropagation();
+        var id = t.getAttribute('data-id');
+        ui.selected[id] = t.checked;
+        renderSelectBar();
+        return;
+      }
+      if (action === 'clear-select'){ ui.selected = {}; render(); return; }
+      if (action === 'filter-category'){ ui.category = t.getAttribute('data-cat'); render(); return; }
+      if (action === 'gallery-select'){
+        var img = $('#gallery-main-img');
+        if (img) img.src = t.getAttribute('data-src');
+        $all('.gallery-thumbs img').forEach(function(el){ el.classList.remove('active'); });
+        t.classList.add('active');
+        return;
+      }
+      if (action === 'print-scope'){
+        doPrint(t.getAttribute('data-scope'), t.getAttribute('data-mode'));
+        return;
+      }
+    });
+    document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && ui.detailId){ ui.detailId=null; render(); } });
+  }
+
+  function doPrint(scope, mode){
+    ui.printMode = mode;
+    var list = scope === 'selected'
+      ? state.products.filter(function(p){ return ui.selected[p.id]; })
+      : filteredProducts();
+    if (!list.length){ alertLike('ไม่มีสินค้าให้พิมพ์'); return; }
+    var b = state.business;
+    var contactBits = [];
+    if (b.phone) contactBits.push('โทร ' + escapeHtml(b.phone));
+    if (b.line) contactBits.push('LINE: ' + escapeHtml(b.line));
+    if (b.email) contactBits.push(escapeHtml(b.email));
+
+    var html = '<div class="shell"><header class="topbar">' +
+      '<div class="brand"><div class="brand-mark">' + (b.logo?'<img src="'+b.logo+'" alt="">':'🏥') + '</div>' +
+      '<div class="brand-text"><h1 class="brand-name">'+escapeHtml(b.name||'แคตตาล็อคสินค้า')+'</h1>' +
+      '<p class="brand-tagline">'+escapeHtml(b.tagline||'')+'</p>' +
+      (contactBits.length?'<p class="brand-contact">'+contactBits.join(' &nbsp;•&nbsp; ')+'</p>':'') +
+      '</div></div></header>' +
+      '<main class="grid">' + list.map(function(p){ return renderCard(p, true); }).join('') + '</main>' +
+      '<footer class="print-footer">' + escapeHtml(b.name||'') + ' &nbsp;•&nbsp; ' + dateThai() +
+      (mode==='no-price' ? ' &nbsp;•&nbsp; เอกสารนี้ไม่แสดงราคา' : '') +
+      '</footer></div>';
+    $('#print-area').innerHTML = html;
+    setTimeout(function(){ window.print(); }, 50);
+  }
+
+  function alertLike(msg){
+    var bar = document.createElement('div');
+    bar.className = 'toast';
+    bar.textContent = msg;
+    bar.style.position = 'fixed'; bar.style.bottom = '20px'; bar.style.right = '20px'; bar.style.zIndex = '90';
+    document.body.appendChild(bar);
+    setTimeout(function(){ bar.remove(); }, 2600);
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>
