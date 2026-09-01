@@ -24,6 +24,19 @@
       "unit": "",
       "status": "available",
       "updatedAt": 1788273986269
+    },
+    {
+      "id": "p_mtisushywgvypl",
+      "name": "แดด",
+      "brand": "ดกดก",
+      "category": "ดก",
+      "description": "",
+      "price": 25,
+      "images": [],
+      "sku": "",
+      "unit": "",
+      "status": "available",
+      "updatedAt": 1788275154886
     }
   ]
 }
